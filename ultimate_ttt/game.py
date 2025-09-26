@@ -10,7 +10,7 @@ using row-major order.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 Player = str  # Either "X" or "O"
 Move = Tuple[int, int]
@@ -25,6 +25,32 @@ WIN_LINES: Tuple[Tuple[int, int, int], ...] = (
     (0, 4, 8),
     (2, 4, 6),
 )
+
+
+def _build_transformations() -> Tuple[Tuple[int, ...], ...]:
+    def transform(func: Callable[[int, int], Tuple[int, int]]) -> Tuple[int, ...]:
+        mapping: List[int] = []
+        for index in range(9):
+            row, col = divmod(index, 3)
+            new_row, new_col = func(row, col)
+            mapping.append(new_row * 3 + new_col)
+        return tuple(mapping)
+
+    operations = (
+        lambda r, c: (r, c),  # Identity
+        lambda r, c: (c, 2 - r),  # Rotate 90°
+        lambda r, c: (2 - r, 2 - c),  # Rotate 180°
+        lambda r, c: (2 - c, r),  # Rotate 270°
+        lambda r, c: (r, 2 - c),  # Mirror vertical axis
+        lambda r, c: (2 - r, c),  # Mirror horizontal axis
+        lambda r, c: (c, r),  # Main diagonal reflection
+        lambda r, c: (2 - c, 2 - r),  # Anti-diagonal reflection
+    )
+
+    return tuple(transform(op) for op in operations)
+
+
+_TRANSFORMATIONS: Tuple[Tuple[int, ...], ...] = _build_transformations()
 
 
 class InvalidMoveError(RuntimeError):
@@ -147,6 +173,13 @@ class UltimateTicTacToe:
         forced_repr = "*" if forced is None else str(forced)
         return f"{current_player}:{boards_repr}#{macro_repr}#{forced_repr}"
 
+    def serialize_canonical(self, current_player: Player) -> str:
+        forced = self._forced_board_index()
+        canonical, _ = canonicalize_state(
+            current_player, self.boards, self.macro_board, forced
+        )
+        return canonical
+
     def render_ascii(self) -> str:
         def cell_value(board: Sequence[str], idx: int) -> str:
             value = board[idx]
@@ -190,3 +223,40 @@ class UltimateTicTacToe:
 
 def moves_to_indices(moves: Iterable[Move]) -> Sequence[int]:
     return tuple(sub * 9 + cell for sub, cell in moves)
+
+
+def canonicalize_state(
+    current_player: Player,
+    boards: Sequence[Sequence[str]],
+    macro_board: Sequence[str],
+    forced_board: Optional[int],
+) -> Tuple[str, Tuple[int, ...]]:
+    best_serialized: Optional[str] = None
+    best_mapping: Tuple[int, ...] = _TRANSFORMATIONS[0]
+
+    for mapping in _TRANSFORMATIONS:
+        transformed_boards: List[List[str]] = [[" "] * 9 for _ in range(9)]
+        transformed_macro: List[str] = [" "] * 9
+
+        for old_macro_index, board in enumerate(boards):
+            new_macro_index = mapping[old_macro_index]
+            transformed_macro[new_macro_index] = macro_board[old_macro_index]
+
+            new_board = [" "] * 9
+            for old_cell_index, value in enumerate(board):
+                new_cell_index = mapping[old_cell_index]
+                new_board[new_cell_index] = value
+            transformed_boards[new_macro_index] = new_board
+
+        new_forced = None if forced_board is None else mapping[forced_board]
+        boards_repr = "|".join("".join(board) for board in transformed_boards)
+        macro_repr = "".join(transformed_macro)
+        forced_repr = "*" if new_forced is None else str(new_forced)
+        serialized = f"{current_player}:{boards_repr}#{macro_repr}#{forced_repr}"
+
+        if best_serialized is None or serialized < best_serialized:
+            best_serialized = serialized
+            best_mapping = mapping
+
+    assert best_serialized is not None
+    return best_serialized, best_mapping
