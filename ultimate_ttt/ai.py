@@ -96,8 +96,7 @@ class UltimateTTTRLAI:
         if next_state_key is None:
             target = reward
         else:
-            opponent_best = self.best_value(next_state_key, next_moves)
-            target = reward - self.gamma * opponent_best
+            target = reward + self.gamma * self.best_value(next_state_key, next_moves)
         table[move_key] = old_value + self.alpha * (target - old_value)
 
     def select_move(

@@ -6,6 +6,7 @@ from .ai import (
     OnPolicySARSAAgent,
     UltimateTTTRLAI,
 )
+from .arena import run_round_robin
 from .game import InvalidMoveError, Move, UltimateTicTacToe
 from .gui import UltimateTTTApp, main
 
@@ -15,6 +16,7 @@ __all__ = [
     "DoubleQLearningAgent",
     "OnPolicySARSAAgent",
     "UltimateTTTRLAI",
+    "run_round_robin",
     "InvalidMoveError",
     "Move",
     "UltimateTicTacToe",

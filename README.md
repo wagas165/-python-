@@ -57,12 +57,28 @@ python -m ultimate_ttt.train --episodes 5000
 
 训练完成后重新启动 GUI 即可加载最新策略。
 
+## 模型对战统计
+
+若想批量对比不同模型的胜率，可使用回合赛脚本让多个策略互博：
+
+```bash
+python -m ultimate_ttt.arena \
+  --agent q=ultimate_ttt/models/ultimate_ttt_q.json \
+  --agent double=ultimate_ttt/models/double_q.json \
+  --agent sarsa=ultimate_ttt/models/sarsa.json \
+  --agent dyna=ultimate_ttt/models/dyna_q.json \
+  --games 50 --seed 13
+```
+
+命令会读取每个模型文件中记录的算法类型，依次让它们轮流执先/执后对战，并统计胜负平局情况。若模型保存时未包含算法字段，可通过 `名称:算法=路径` 的形式显式指定（例如 `--agent classic:q_learning=...`）。
+
 ## 项目结构
 
 ```
 ultimate_ttt/
 ├── __init__.py          # 包导出
 ├── ai.py                # 强化学习策略与辅助函数
+├── arena.py             # 模型互博与胜率评估脚本
 ├── game.py              # 核心棋盘逻辑
 ├── gui.py               # Tkinter 图形界面
 ├── models/

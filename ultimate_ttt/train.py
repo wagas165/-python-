@@ -13,7 +13,7 @@ from .ai import (
     OnPolicySARSAAgent,
     UltimateTTTRLAI,
 )
-from .game import Player, UltimateTicTacToe
+from .game import Move, Player, UltimateTicTacToe
 
 TabularAgentType = Type[UltimateTTTRLAI]
 
@@ -21,39 +21,35 @@ TabularAgentType = Type[UltimateTTTRLAI]
 def play_episode_value(agent: UltimateTTTRLAI, epsilon: float) -> Tuple[str, int]:
     game = UltimateTicTacToe()
     current_player: Player = "X"
+    pending: Dict[Player, Tuple[str, Move]] = {}
     move_count = 0
 
     while not game.terminal:
         state_key = game.serialize(current_player)
         moves = game.available_moves()
+        if current_player in pending:
+            prev_state, prev_move = pending[current_player]
+            agent.update(prev_state, prev_move, 0.0, state_key, moves, next_action=None)
         move = agent.choose_action(state_key, moves, epsilon)
+        pending[current_player] = (state_key, move)
         game.make_move(current_player, move)
         move_count += 1
-
         if game.terminal:
-            if game.winner == current_player:
-                agent.update(state_key, move, 1.0, None, [], next_action=None)
-                return current_player, move_count
-            if game.is_draw:
-                agent.update(state_key, move, 0.2, None, [], next_action=None)
-                return "draw", move_count
-            agent.update(state_key, move, -1.0, None, [], next_action=None)
-            return ("O" if current_player == "X" else "X"), move_count
+            break
+        current_player = "O" if current_player == "X" else "X"
 
-        next_player = "O" if current_player == "X" else "X"
-        next_state_key = game.serialize(next_player)
-        next_moves = game.available_moves()
-        agent.update(
-            state_key,
-            move,
-            0.0,
-            next_state_key,
-            next_moves,
-            next_action=None,
-        )
-        current_player = next_player
+    winner = game.winner
+    if winner is None:
+        rewards = {"X": 0.0, "O": 0.0}
+    else:
+        rewards = {
+            "X": 1.0 if winner == "X" else -1.0,
+            "O": 1.0 if winner == "O" else -1.0,
+        }
+    for player, (state_key, move) in pending.items():
+        agent.update(state_key, move, rewards[player], None, [], next_action=None)
 
-    return "draw", move_count
+    return (winner if winner is not None else "draw"), move_count
 
 
 def play_episode_sarsa(agent: OnPolicySARSAAgent, epsilon: float) -> Tuple[str, int]:
