@@ -6,13 +6,87 @@ import math
 import os
 import random
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
-from .game import Move, Player, UltimateTicTacToe
+from .game import Move, Player, UltimateTicTacToe, canonicalize_state
 
 
 def _move_to_key(move: Move) -> str:
     return f"{move[0]}-{move[1]}"
+
+
+def _parse_serialized_state(
+    state_key: str,
+) -> Optional[Tuple[Player, List[List[str]], List[str], Optional[int]]]:
+    try:
+        player_part, remainder = state_key.split(":", 1)
+        boards_part, macro_part, forced_part = remainder.split("#")
+    except ValueError:
+        return None
+
+    boards_strings = boards_part.split("|")
+    if len(boards_strings) != 9 or len(macro_part) != 9:
+        return None
+    if not all(len(board) == 9 for board in boards_strings):
+        return None
+
+    boards = [list(board) for board in boards_strings]
+    macro_board = list(macro_part)
+
+    forced_board: Optional[int]
+    if forced_part == "*":
+        forced_board = None
+    else:
+        try:
+            forced_board = int(forced_part)
+        except ValueError:
+            return None
+
+    return player_part, boards, macro_board, forced_board
+
+
+def _canonicalise_q_tables(
+    q_values: Dict[str, Dict[str, float]]
+) -> Dict[str, Dict[str, float]]:
+    identity_mapping: Tuple[int, ...] = tuple(range(9))
+    state_sums: Dict[str, Dict[str, float]] = {}
+    state_counts: Dict[str, Dict[str, int]] = {}
+
+    for state_key, table in q_values.items():
+        parsed = _parse_serialized_state(state_key)
+        if parsed is None:
+            canonical_key = state_key
+            mapping = identity_mapping
+        else:
+            player, boards, macro, forced = parsed
+            canonical_key, mapping = canonicalize_state(player, boards, macro, forced)
+
+        sum_table = state_sums.setdefault(canonical_key, {})
+        count_table = state_counts.setdefault(canonical_key, {})
+
+        for move_key, value in table.items():
+            try:
+                sub_part, cell_part = move_key.split("-", 1)
+                sub_index = int(sub_part)
+                cell_index = int(cell_part)
+                transformed_key = f"{mapping[sub_index]}-{mapping[cell_index]}"
+            except (ValueError, IndexError):
+                transformed_key = move_key
+
+            val = float(value)
+            sum_table[transformed_key] = sum_table.get(transformed_key, 0.0) + val
+            count_table[transformed_key] = count_table.get(transformed_key, 0) + 1
+
+    canonical: Dict[str, Dict[str, float]] = {}
+    for state_key, move_sums in state_sums.items():
+        counts = state_counts[state_key]
+        move_entries = {
+            move_key: move_sums[move_key] / counts[move_key]
+            for move_key in move_sums
+        }
+        canonical[state_key] = move_entries
+
+    return canonical
 
 @dataclass
 class UltimateTTTRLAI:
@@ -24,7 +98,7 @@ class UltimateTTTRLAI:
     q_values: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def _state_key(self, game: UltimateTicTacToe, player: Player) -> str:
-        return game.serialize(player)
+        return game.serialize_canonical(player)
 
     def _ensure_state(self, state_key: str, moves: Sequence[Move]) -> Dict[str, float]:
         table = self.q_values.setdefault(state_key, {})
@@ -92,8 +166,17 @@ class UltimateTTTRLAI:
         return self.choose_action(state_key, moves, epsilon)
 
     def save(self, path: str) -> None:
+        canonical_q_values = _canonicalise_q_tables(self.q_values)
+        self.q_values = canonical_q_values
+
+        data = {
+            "algorithm": self.__class__.__name__,
+            "format_version": 2,
+            "canonical_keys": True,
+            "q_values": canonical_q_values,
+        }
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump(self.q_values, fh)
+            json.dump(data, fh)
 
     @classmethod
     def load(cls, path: str) -> "UltimateTTTRLAI":
@@ -101,20 +184,22 @@ class UltimateTTTRLAI:
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-            agent.q_values = {
-                state: {move: float(value) for move, value in table.items()}
-                for state, table in data.items()
-            }
+
+            if isinstance(data, dict) and "algorithm" in data:
+                raw_tables = data.get("q_values", {})
+            elif isinstance(data, dict):
+                raw_tables = data
+            else:
+                raw_tables = {}
+
+            agent.q_values = _canonicalise_q_tables(raw_tables)
         return agent
 
     def to_serialisable(self) -> Dict[str, Dict[str, float]]:
         return self.q_values
 
     def load_from_dict(self, data: Dict[str, Dict[str, float]]) -> None:
-        self.q_values = {
-            state: {move: float(value) for move, value in table.items()}
-            for state, table in data.items()
-        }
+        self.q_values = _canonicalise_q_tables(data)
 
 
 def immediate_winning_move(game: UltimateTicTacToe, player: Player) -> Optional[Move]:
