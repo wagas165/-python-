@@ -260,3 +260,19 @@ def canonicalize_state(
 
     assert best_serialized is not None
     return best_serialized, best_mapping
+
+
+def apply_mapping_to_move(move: Move, mapping: Sequence[int]) -> Move:
+    """Transform a move using the provided mapping permutation."""
+
+    sub_index, cell_index = move
+    return mapping[sub_index], mapping[cell_index]
+
+
+def invert_mapping(mapping: Sequence[int]) -> Tuple[int, ...]:
+    """Return the inverse permutation for ``mapping``."""
+
+    inverse = [0] * len(mapping)
+    for original_index, mapped_index in enumerate(mapping):
+        inverse[mapped_index] = original_index
+    return tuple(inverse)
