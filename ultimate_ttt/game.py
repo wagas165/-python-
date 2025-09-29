@@ -171,6 +171,7 @@ class UltimateTicTacToe:
         return _serialize_components(current_player, self.boards, self.macro_board, forced)
 
     def serialize_canonical(self, current_player: Player) -> str:
+        """Return the canonical serialization while respecting forced boards."""
         forced = self._forced_board_index()
         canonical, _ = canonicalize_state(
             current_player, self.boards, self.macro_board, forced
@@ -259,6 +260,7 @@ def canonicalize_state(
     macro_board: Sequence[str],
     forced_board: Optional[int],
 ) -> Tuple[str, Tuple[int, ...]]:
+    """Canonicalize a state under all symmetries, aligning forced sub-boards."""
     best_serialized: Optional[str] = None
     best_mapping: Tuple[int, ...] = MACRO_MAPPINGS[0]
 
