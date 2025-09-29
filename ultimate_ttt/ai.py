@@ -93,7 +93,7 @@ class UltimateTTTRLAI:
     """Simple Q-learning agent for Ultimate Tic-Tac-Toe."""
 
     alpha: float = 0.4
-    gamma: float = 0.95
+    gamma: float = 1.0
     default_q: float = 0.0
     q_values: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
