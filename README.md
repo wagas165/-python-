@@ -5,8 +5,9 @@
 - 9×9 棋盘，由九个 3×3 小棋盘组成。
 - 小棋盘内部规则与经典井字棋相同，先连成一线即获胜，占领该小棋盘。
 - 大棋盘胜利条件：在小棋盘的胜负记录上再连成一线。
-- 强化学习（Q-learning）AI，支持三个难度等级：简单 / 中等 / 困难。
+- AlphaZero 风格的强化学习 AI，支持三个难度等级：简单 / 中等 / 困难。
 - 内置 Tkinter 图形界面，开箱即玩，可在本地离线运行。
+- 落子区域实时高亮，并对无效点击给出即时反馈。
 - 提供快速训练入口，以及命令行批量训练脚本。
 
 ## 运行环境
@@ -36,16 +37,18 @@ python -m ultimate_ttt.gui
 
 ## 强化学习训练
 
-图形界面中的“训练 AI”按钮会运行 200 局快速自我对弈，并自动保存策略。你也可以通过命令行批量训练：
+ 图形界面中的“训练 AI”按钮会运行 200 局快速自我对弈，并自动保存策略。你也可以通过命令行批量训练：
 
 ```bash
-python -m ultimate_ttt.train --episodes 5000
+python -m ultimate_ttt.train --episodes 5000 --simulations 200
 ```
 
 可选参数：
 
-- `--model-path`: 保存 Q 值的 JSON 文件路径，默认位于 `ultimate_ttt/models/ultimate_ttt_q.json`。
-- `--epsilon-start` / `--epsilon-end`: 探索率的线性衰减区间。
+- `--model-path`: 保存神经网络权重的 JSON 文件路径，默认位于 `ultimate_ttt/models/ultimate_ttt_alpha.json`。
+- `--simulations`: 每一步使用的 MCTS 搜索次数。
+- `--replay-size` / `--batch-size`: 自对弈经验回放池大小与训练批量。
+- `--learning-rate` / `--training-steps`: 神经网络优化器相关参数。
 - `--seed`: 设定随机种子以复现训练过程。
 
 训练完成后重新启动 GUI 即可加载最新策略。
@@ -59,7 +62,7 @@ ultimate_ttt/
 ├── game.py              # 核心棋盘逻辑
 ├── gui.py               # Tkinter 图形界面
 ├── models/
-│   └── ultimate_ttt_q.json  # Q-learning 参数
+│   └── ultimate_ttt_alpha.json  # AlphaZero 网络参数
 └── train.py             # 自我对弈训练脚本
 ```
 
