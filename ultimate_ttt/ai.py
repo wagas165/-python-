@@ -8,7 +8,17 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .game import Move, Player, UltimateTicTacToe, canonicalize_state
+from .game import Move, Player, UltimateTicTacToe, apply_mapping_to_move, canonicalize_state
+from .symmetry import invert_mapping
+
+
+@dataclass(frozen=True)
+class CanonicalState:
+    """Canonical representation of a state plus its symmetry mapping."""
+
+    key: str
+    mapping: Tuple[int, ...]
+    inverse_mapping: Tuple[int, ...]
 
 
 def _move_to_key(move: Move) -> str:
@@ -97,8 +107,16 @@ class UltimateTTTRLAI:
     default_q: float = 0.0
     q_values: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
-    def _state_key(self, game: UltimateTicTacToe, player: Player) -> str:
-        return game.serialize_canonical(player)
+    def _state_key(self, game: UltimateTicTacToe, player: Player) -> CanonicalState:
+        forced = game.forced_board_index()
+        canonical_key, mapping = canonicalize_state(
+            player, game.boards, game.macro_board, forced
+        )
+        return CanonicalState(
+            key=canonical_key,
+            mapping=mapping,
+            inverse_mapping=invert_mapping(mapping),
+        )
 
     def _ensure_state(self, state_key: str, moves: Sequence[Move]) -> Dict[str, float]:
         table = self.q_values.setdefault(state_key, {})
@@ -110,48 +128,62 @@ class UltimateTTTRLAI:
 
     def choose_action(
         self,
-        state_key: str,
+        state: CanonicalState,
         moves: Sequence[Move],
         epsilon: float,
     ) -> Move:
-        self._ensure_state(state_key, moves)
         if not moves:
             raise ValueError("No available moves to choose from")
+        canonical_moves = tuple(
+            apply_mapping_to_move(move, state.mapping) for move in moves
+        )
+        table = self._ensure_state(state.key, canonical_moves)
         if random.random() < epsilon:
-            return random.choice(list(moves))
-        table = self.q_values[state_key]
-        best_value = -math.inf
-        best_moves: List[Move] = []
-        for move in moves:
-            value = table.get(_move_to_key(move), self.default_q)
-            if value > best_value:
-                best_value = value
-                best_moves = [move]
-            elif value == best_value:
-                best_moves.append(move)
-        return random.choice(best_moves)
+            chosen_canonical = random.choice(list(canonical_moves))
+        else:
+            best_value = -math.inf
+            best_moves: List[Move] = []
+            for canonical_move in canonical_moves:
+                value = table.get(_move_to_key(canonical_move), self.default_q)
+                if value > best_value:
+                    best_value = value
+                    best_moves = [canonical_move]
+                elif value == best_value:
+                    best_moves.append(canonical_move)
+            chosen_canonical = random.choice(best_moves)
 
-    def best_value(self, state_key: str, moves: Sequence[Move]) -> float:
+        chosen_move = apply_mapping_to_move(chosen_canonical, state.inverse_mapping)
+        if chosen_move not in moves:
+            raise RuntimeError("Canonical mapping produced an illegal move")
+        return chosen_move
+
+    def best_value(self, state: CanonicalState, moves: Sequence[Move]) -> float:
         if not moves:
             return 0.0
-        table = self._ensure_state(state_key, moves)
-        return max(table.get(_move_to_key(move), self.default_q) for move in moves)
+        canonical_moves = tuple(
+            apply_mapping_to_move(move, state.mapping) for move in moves
+        )
+        table = self._ensure_state(state.key, canonical_moves)
+        return max(
+            table.get(_move_to_key(move), self.default_q) for move in canonical_moves
+        )
 
     def update(
         self,
-        state_key: str,
+        state: CanonicalState,
         move: Move,
         reward: float,
-        next_state_key: Optional[str],
+        next_state: Optional[CanonicalState],
         next_moves: Sequence[Move],
     ) -> None:
-        move_key = _move_to_key(move)
-        table = self._ensure_state(state_key, (move,))
+        canonical_move = apply_mapping_to_move(move, state.mapping)
+        move_key = _move_to_key(canonical_move)
+        table = self._ensure_state(state.key, (canonical_move,))
         old_value = table.get(move_key, self.default_q)
-        if next_state_key is None:
+        if next_state is None:
             target = reward
         else:
-            opponent_best = self.best_value(next_state_key, next_moves)
+            opponent_best = self.best_value(next_state, next_moves)
             target = reward - self.gamma * opponent_best
         table[move_key] = old_value + self.alpha * (target - old_value)
 
@@ -161,9 +193,9 @@ class UltimateTTTRLAI:
         player: Player,
         epsilon: float = 0.0,
     ) -> Move:
-        state_key = self._state_key(game, player)
+        state = self._state_key(game, player)
         moves = game.available_moves()
-        return self.choose_action(state_key, moves, epsilon)
+        return self.choose_action(state, moves, epsilon)
 
     def save(self, path: str) -> None:
         canonical_q_values = _canonicalise_q_tables(self.q_values)

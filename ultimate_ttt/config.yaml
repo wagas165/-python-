@@ -1,0 +1,16 @@
+# Default configuration for AlphaZero-style training.
+selfplay:
+  episodes: 100
+  temperature_moves: 16
+  temperature: 1.0
+  final_temperature: 0.01
+mcts:
+  num_simulations: 400
+  c_puct: 2.0
+  dirichlet_alpha: 0.3
+  dirichlet_epsilon: 0.25
+training:
+  buffer_capacity: 200000
+  batch_size: 256
+  learning_rate: 0.0003
+  device: cpu

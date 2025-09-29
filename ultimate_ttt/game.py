@@ -10,9 +10,11 @@ using row-major order.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+from .symmetry import MACRO_MAPPINGS, SYMMETRIES
 
 Player = str  # Either "X" or "O"
 Move = Tuple[int, int]
@@ -27,36 +29,6 @@ WIN_LINES: Tuple[Tuple[int, int, int], ...] = (
     (0, 4, 8),
     (2, 4, 6),
 )
-
-
-def _build_transformations() -> Tuple[Tuple[int, ...], ...]:
-    """Return the eight symmetries of a 3x3 grid as index mappings."""
-
-    def transform(func: Callable[[int, int], Tuple[int, int]]) -> Tuple[int, ...]:
-        mapping: List[int] = []
-        for index in range(9):
-            row, col = divmod(index, 3)
-            new_row, new_col = func(row, col)
-            mapping.append(new_row * 3 + new_col)
-        return tuple(mapping)
-
-    operations = (
-        lambda r, c: (r, c),
-        lambda r, c: (c, 2 - r),
-        lambda r, c: (2 - r, 2 - c),
-        lambda r, c: (2 - c, r),
-        lambda r, c: (r, 2 - c),
-        lambda r, c: (2 - r, c),
-        lambda r, c: (c, r),
-        lambda r, c: (2 - c, 2 - r),
-    )
-
-    return tuple(transform(op) for op in operations)
-
-
-_TRANSFORMATIONS: Tuple[Tuple[int, ...], ...] = _build_transformations()
-
-
 class InvalidMoveError(RuntimeError):
     """Raised when a move is attempted that is not legal in the current state."""
 
@@ -290,23 +262,24 @@ def canonicalize_state(
 ) -> Tuple[str, Tuple[int, ...]]:
     """Canonicalize a state under all symmetries, aligning forced sub-boards."""
     best_serialized: Optional[str] = None
-    best_mapping: Tuple[int, ...] = _TRANSFORMATIONS[0]
+    best_mapping: Tuple[int, ...] = MACRO_MAPPINGS[0]
 
-    for mapping in _TRANSFORMATIONS:
+    for symmetry in SYMMETRIES:
+        mapping = symmetry.macro
         transformed_boards: List[List[str]] = [[" "] * 9 for _ in range(9)]
         transformed_macro: List[str] = [" "] * 9
 
         for old_macro_index, board in enumerate(boards):
-            new_macro_index = mapping[old_macro_index]
+            new_macro_index = symmetry.macro[old_macro_index]
             transformed_macro[new_macro_index] = macro_board[old_macro_index]
 
             new_board = [" "] * 9
             for old_cell_index, value in enumerate(board):
-                new_cell_index = mapping[old_cell_index]
+                new_cell_index = symmetry.cell[old_cell_index]
                 new_board[new_cell_index] = value
             transformed_boards[new_macro_index] = new_board
 
-        new_forced = None if forced_board is None else mapping[forced_board]
+        new_forced = None if forced_board is None else symmetry.macro[forced_board]
         serialized = _serialize_components(
             current_player, transformed_boards, transformed_macro, new_forced
         )
