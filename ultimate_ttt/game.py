@@ -14,7 +14,7 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .symmetry import MACRO_MAPPINGS
+from .symmetry import MACRO_MAPPINGS, SYMMETRIES
 
 Player = str  # Either "X" or "O"
 Move = Tuple[int, int]
@@ -167,11 +167,8 @@ class UltimateTicTacToe:
             self.terminal = True
 
     def serialize(self, current_player: Player) -> str:
-        boards_repr = "|".join("".join(board) for board in self.boards)
-        macro_repr = "".join(self.macro_board)
         forced = self._forced_board_index()
-        forced_repr = "*" if forced is None else str(forced)
-        return f"{current_player}:{boards_repr}#{macro_repr}#{forced_repr}"
+        return _serialize_components(current_player, self.boards, self.macro_board, forced)
 
     def serialize_canonical(self, current_player: Player) -> str:
         forced = self._forced_board_index()
@@ -244,6 +241,18 @@ def apply_mapping_to_move(move: Move, mapping: Sequence[int]) -> Move:
     return mapping[move[0]], mapping[move[1]]
 
 
+def _serialize_components(
+    current_player: Player,
+    boards: Sequence[Sequence[str]],
+    macro_board: Sequence[str],
+    forced_board: Optional[int],
+) -> str:
+    boards_repr = "|".join("".join(board) for board in boards)
+    macro_repr = "".join(macro_board)
+    forced_repr = "*" if forced_board is None else str(forced_board)
+    return f"{current_player}:{boards_repr}#{macro_repr}#{forced_repr}"
+
+
 def canonicalize_state(
     current_player: Player,
     boards: Sequence[Sequence[str]],
@@ -253,7 +262,8 @@ def canonicalize_state(
     best_serialized: Optional[str] = None
     best_mapping: Tuple[int, ...] = MACRO_MAPPINGS[0]
 
-    for mapping in MACRO_MAPPINGS:
+    for symmetry in SYMMETRIES:
+        mapping = symmetry.macro
         transformed_boards: List[List[str]] = [[" "] * 9 for _ in range(9)]
         transformed_macro: List[str] = [" "] * 9
 
@@ -268,10 +278,9 @@ def canonicalize_state(
             transformed_boards[new_macro_index] = new_board
 
         new_forced = None if forced_board is None else mapping[forced_board]
-        boards_repr = "|".join("".join(board) for board in transformed_boards)
-        macro_repr = "".join(transformed_macro)
-        forced_repr = "*" if new_forced is None else str(new_forced)
-        serialized = f"{current_player}:{boards_repr}#{macro_repr}#{forced_repr}"
+        serialized = _serialize_components(
+            current_player, transformed_boards, transformed_macro, new_forced
+        )
 
         if best_serialized is None or serialized < best_serialized:
             best_serialized = serialized
