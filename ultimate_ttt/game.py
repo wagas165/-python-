@@ -12,6 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Sequence, Tuple
 
+import numpy as np
+
+from .symmetry import MACRO_MAPPINGS, CELL_MAPPINGS, SYMMETRIES
+
 Player = str  # Either "X" or "O"
 Move = Tuple[int, int]
 
@@ -25,8 +29,6 @@ WIN_LINES: Tuple[Tuple[int, int, int], ...] = (
     (0, 4, 8),
     (2, 4, 6),
 )
-
-
 class InvalidMoveError(RuntimeError):
     """Raised when a move is attempted that is not legal in the current state."""
 
@@ -83,6 +85,11 @@ class UltimateTicTacToe:
                     moves.append((sub_idx, cell_idx))
         return moves
 
+    def forced_board_index(self) -> Optional[int]:
+        """Public accessor exposing the index of the forced sub-board, if any."""
+
+        return self._forced_board_index()
+
     def _forced_board_index(self) -> Optional[int]:
         if self.last_move is None:
             return None
@@ -115,6 +122,25 @@ class UltimateTicTacToe:
 
         self._update_macro_board()
 
+    def legal_action_mask(self) -> np.ndarray:
+        """Return a boolean mask over the 81 global actions that are legal."""
+
+        mask = np.zeros(81, dtype=bool)
+        for sub_idx, cell_idx in self.available_moves():
+            mask[sub_idx * 9 + cell_idx] = True
+        return mask
+
+    def terminal_outcome_from_x_perspective(self) -> float:
+        """Return +1/-1/0 from X's perspective for terminal positions."""
+
+        if not self.terminal:
+            raise ValueError("terminal_outcome_from_x_perspective called before game end")
+        if self.winner == "X":
+            return 1.0
+        if self.winner == "O":
+            return -1.0
+        return 0.0
+
     def _update_sub_board(self, board_index: int) -> str:
         board = self.boards[board_index]
         for line in WIN_LINES:
@@ -141,11 +167,16 @@ class UltimateTicTacToe:
             self.terminal = True
 
     def serialize(self, current_player: Player) -> str:
-        boards_repr = "|".join("".join(board) for board in self.boards)
-        macro_repr = "".join(self.macro_board)
         forced = self._forced_board_index()
-        forced_repr = "*" if forced is None else str(forced)
-        return f"{current_player}:{boards_repr}#{macro_repr}#{forced_repr}"
+        return _serialize_components(current_player, self.boards, self.macro_board, forced)
+
+    def serialize_canonical(self, current_player: Player) -> str:
+        """Return the canonical serialization while respecting forced boards."""
+        forced = self._forced_board_index()
+        canonical, _, _ = canonicalize_state(
+            current_player, self.boards, self.macro_board, forced
+        )
+        return canonical
 
     def render_ascii(self) -> str:
         def cell_value(board: Sequence[str], idx: int) -> str:
@@ -189,4 +220,79 @@ class UltimateTicTacToe:
 
 
 def moves_to_indices(moves: Iterable[Move]) -> Sequence[int]:
-    return tuple(sub * 9 + cell for sub, cell in moves)
+    return tuple(action_to_index(move) for move in moves)
+
+
+def action_to_index(move: Move) -> int:
+    sub_idx, cell_idx = move
+    if not 0 <= sub_idx < 9 or not 0 <= cell_idx < 9:
+        raise ValueError("move components must be in range 0..8")
+    return sub_idx * 9 + cell_idx
+
+
+def index_to_action(index: int) -> Move:
+    if not 0 <= index < 81:
+        raise ValueError("action index must be in range 0..80")
+    return divmod(index, 9)
+
+
+def apply_mapping_to_move(
+    move: Move,
+    macro_mapping: Sequence[int],
+    cell_mapping: Sequence[int],
+) -> Move:
+    """Return the move transformed by the given symmetry mappings."""
+
+    return macro_mapping[move[0]], cell_mapping[move[1]]
+
+
+def _serialize_components(
+    current_player: Player,
+    boards: Sequence[Sequence[str]],
+    macro_board: Sequence[str],
+    forced_board: Optional[int],
+) -> str:
+    boards_repr = "|".join("".join(board) for board in boards)
+    macro_repr = "".join(macro_board)
+    forced_repr = "*" if forced_board is None else str(forced_board)
+    return f"{current_player}:{boards_repr}#{macro_repr}#{forced_repr}"
+
+
+def canonicalize_state(
+    current_player: Player,
+    boards: Sequence[Sequence[str]],
+    macro_board: Sequence[str],
+    forced_board: Optional[int],
+) -> Tuple[str, Tuple[int, ...], Tuple[int, ...]]:
+    """Canonicalize a state under all symmetries, aligning forced sub-boards."""
+
+    best_serialized: Optional[str] = None
+    best_macro: Tuple[int, ...] = MACRO_MAPPINGS[0]
+    best_cell: Tuple[int, ...] = CELL_MAPPINGS[0]
+
+    for symmetry in SYMMETRIES:
+        transformed_boards: List[List[str]] = [[" "] * 9 for _ in range(9)]
+        transformed_macro: List[str] = [" "] * 9
+
+        for old_macro_index, board in enumerate(boards):
+            new_macro_index = symmetry.macro[old_macro_index]
+            transformed_macro[new_macro_index] = macro_board[old_macro_index]
+
+            new_board = [" "] * 9
+            for old_cell_index, value in enumerate(board):
+                new_cell_index = symmetry.cell[old_cell_index]
+                new_board[new_cell_index] = value
+            transformed_boards[new_macro_index] = new_board
+
+        new_forced = None if forced_board is None else symmetry.macro[forced_board]
+        serialized = _serialize_components(
+            current_player, transformed_boards, transformed_macro, new_forced
+        )
+
+        if best_serialized is None or serialized < best_serialized:
+            best_serialized = serialized
+            best_macro = symmetry.macro
+            best_cell = symmetry.cell
+
+    assert best_serialized is not None
+    return best_serialized, best_macro, best_cell
