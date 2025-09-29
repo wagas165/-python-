@@ -16,30 +16,30 @@ def play_episode(agent: UltimateTTTRLAI, epsilon: float) -> Tuple[str, int]:
     move_count = 0
 
     while not game.terminal:
-        state_key = agent._state_key(game, current_player)
+        state = agent._state_key(game, current_player)
         moves = game.available_moves()
-        move = agent.choose_action(state_key, moves, epsilon)
+        move = agent.choose_action(state, moves, epsilon)
         game.make_move(current_player, move)
         move_count += 1
 
         if game.terminal:
             if game.winner == current_player:
                 reward = 1.0
-                agent.update(state_key, move, reward, None, [])
+                agent.update(state, move, reward, None, [])
                 return current_player, move_count
             if game.is_draw:
-                agent.update(state_key, move, 0.2, None, [])
+                agent.update(state, move, 0.2, None, [])
                 return "draw", move_count
-            agent.update(state_key, move, -1.0, None, [])
+            agent.update(state, move, -1.0, None, [])
             return (
                 ("O" if current_player == "X" else "X"),
                 move_count,
             )
 
         next_player = "O" if current_player == "X" else "X"
-        next_state_key = agent._state_key(game, next_player)
+        next_state = agent._state_key(game, next_player)
         next_moves = game.available_moves()
-        agent.update(state_key, move, 0.0, next_state_key, next_moves)
+        agent.update(state, move, 0.0, next_state, next_moves)
         current_player = next_player
 
     return "draw", move_count

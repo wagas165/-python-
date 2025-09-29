@@ -8,11 +8,26 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .game import Move, Player, UltimateTicTacToe, canonicalize_state
+from .game import (
+    Move,
+    Player,
+    UltimateTicTacToe,
+    apply_mapping_to_move,
+    canonicalize_state,
+    invert_mapping,
+)
+
+
+StateEncoding = Tuple[str, Tuple[int, ...]]
 
 
 def _move_to_key(move: Move) -> str:
     return f"{move[0]}-{move[1]}"
+
+
+def _key_to_move(key: str) -> Move:
+    sub_part, cell_part = key.split("-", 1)
+    return int(sub_part), int(cell_part)
 
 
 def _parse_serialized_state(
@@ -66,10 +81,9 @@ def _canonicalise_q_tables(
 
         for move_key, value in table.items():
             try:
-                sub_part, cell_part = move_key.split("-", 1)
-                sub_index = int(sub_part)
-                cell_index = int(cell_part)
-                transformed_key = f"{mapping[sub_index]}-{mapping[cell_index]}"
+                move = _key_to_move(move_key)
+                canonical_move = apply_mapping_to_move(move, mapping)
+                transformed_key = _move_to_key(canonical_move)
             except (ValueError, IndexError):
                 transformed_key = move_key
 
@@ -97,61 +111,80 @@ class UltimateTTTRLAI:
     default_q: float = 0.0
     q_values: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
-    def _state_key(self, game: UltimateTicTacToe, player: Player) -> str:
-        return game.serialize_canonical(player)
+    def _state_key(self, game: UltimateTicTacToe, player: Player) -> StateEncoding:
+        forced = game._forced_board_index()
+        return canonicalize_state(player, game.boards, game.macro_board, forced)
 
-    def _ensure_state(self, state_key: str, moves: Sequence[Move]) -> Dict[str, float]:
+    def _ensure_state(
+        self, state: StateEncoding, moves: Sequence[Move]
+    ) -> Dict[str, float]:
+        state_key, mapping = state
         table = self.q_values.setdefault(state_key, {})
         for move in moves:
-            key = _move_to_key(move)
+            canonical_move = apply_mapping_to_move(move, mapping)
+            key = _move_to_key(canonical_move)
             if key not in table:
                 table[key] = self.default_q
         return table
 
     def choose_action(
         self,
-        state_key: str,
+        state: StateEncoding,
         moves: Sequence[Move],
         epsilon: float,
     ) -> Move:
-        self._ensure_state(state_key, moves)
         if not moves:
             raise ValueError("No available moves to choose from")
-        if random.random() < epsilon:
-            return random.choice(list(moves))
-        table = self.q_values[state_key]
-        best_value = -math.inf
-        best_moves: List[Move] = []
-        for move in moves:
-            value = table.get(_move_to_key(move), self.default_q)
-            if value > best_value:
-                best_value = value
-                best_moves = [move]
-            elif value == best_value:
-                best_moves.append(move)
-        return random.choice(best_moves)
 
-    def best_value(self, state_key: str, moves: Sequence[Move]) -> float:
+        table = self._ensure_state(state, moves)
+        _, mapping = state
+        canonical_moves = [apply_mapping_to_move(move, mapping) for move in moves]
+
+        if random.random() < epsilon:
+            chosen_canonical = random.choice(canonical_moves)
+        else:
+            best_value = -math.inf
+            best_moves: List[Move] = []
+            for canonical_move in canonical_moves:
+                value = table.get(_move_to_key(canonical_move), self.default_q)
+                if value > best_value:
+                    best_value = value
+                    best_moves = [canonical_move]
+                elif value == best_value:
+                    best_moves.append(canonical_move)
+            chosen_canonical = random.choice(best_moves)
+
+        inverse_mapping = invert_mapping(mapping)
+        return apply_mapping_to_move(chosen_canonical, inverse_mapping)
+
+    def best_value(self, state: StateEncoding, moves: Sequence[Move]) -> float:
         if not moves:
             return 0.0
-        table = self._ensure_state(state_key, moves)
-        return max(table.get(_move_to_key(move), self.default_q) for move in moves)
+        table = self._ensure_state(state, moves)
+        _, mapping = state
+        canonical_moves = [apply_mapping_to_move(move, mapping) for move in moves]
+        return max(
+            table.get(_move_to_key(canonical_move), self.default_q)
+            for canonical_move in canonical_moves
+        )
 
     def update(
         self,
-        state_key: str,
+        state: StateEncoding,
         move: Move,
         reward: float,
-        next_state_key: Optional[str],
+        next_state: Optional[StateEncoding],
         next_moves: Sequence[Move],
     ) -> None:
-        move_key = _move_to_key(move)
-        table = self._ensure_state(state_key, (move,))
+        _, mapping = state
+        canonical_move = apply_mapping_to_move(move, mapping)
+        move_key = _move_to_key(canonical_move)
+        table = self._ensure_state(state, (move,))
         old_value = table.get(move_key, self.default_q)
-        if next_state_key is None:
+        if next_state is None:
             target = reward
         else:
-            opponent_best = self.best_value(next_state_key, next_moves)
+            opponent_best = self.best_value(next_state, next_moves)
             target = reward - self.gamma * opponent_best
         table[move_key] = old_value + self.alpha * (target - old_value)
 
@@ -161,9 +194,9 @@ class UltimateTTTRLAI:
         player: Player,
         epsilon: float = 0.0,
     ) -> Move:
-        state_key = self._state_key(game, player)
+        state = self._state_key(game, player)
         moves = game.available_moves()
-        return self.choose_action(state_key, moves, epsilon)
+        return self.choose_action(state, moves, epsilon)
 
     def save(self, path: str) -> None:
         canonical_q_values = _canonicalise_q_tables(self.q_values)
