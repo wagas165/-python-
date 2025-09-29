@@ -1,0 +1,28 @@
+training:
+  seed: 0
+  use_gpu: true
+  channels: 64
+  res_blocks: 8
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  batch_size: 256
+  steps_per_cycle: 1000
+  cycles: 10
+  grad_clip: 1.0
+  checkpoint: ultimate_ttt/models/az_checkpoint.pt
+selfplay:
+  games_per_cycle: 50
+  simulations: 400
+  c_puct: 2.0
+  dirichlet_epsilon: 0.25
+  dirichlet_alpha: 0.3
+  temperature_moves: 16
+  augment: true
+replay:
+  capacity: 200000
+evaluation:
+  interval: 5
+  matches: 200
+  simulations: 200
+  c_puct: 2.0
+  threshold: 0.55
